@@ -1,0 +1,8 @@
+// Sample startup script for the shell emulator.
+// Comments start with two slashes and are skipped by the loader.
+
+ls /tmp
+cd /home/user
+// A comment in the middle also works.
+ls "my documents"
+exit

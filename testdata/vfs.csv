@@ -1,0 +1,5 @@
+path,type,content
+/,dir,
+/home,dir,
+/home/user,dir,
+/home/user/readme.txt,file,Hello world
