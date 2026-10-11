@@ -5,6 +5,11 @@ ls /
 cd home
 ls
 cat readme.txt
-cd ..
+cp readme.txt /tmp
+cd /tmp
+ls
+cp -r /home /tmp
+ls
+cd /
 uptime
 exit

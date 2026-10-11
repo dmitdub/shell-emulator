@@ -197,3 +197,86 @@ func TestUptimeFormat(t *testing.T) {
 		t.Errorf("uptime output %q missing 'second'", got)
 	}
 }
+
+// ---- cp ----
+
+// TestCpFile checks copying a file into an existing directory.
+func TestCpFile(t *testing.T) {
+	ctx, _, _ := newTestContext(t)
+
+	ctx.Cp([]string{"/home/readme.txt", "/"})
+
+	if ctx.Root.FindChild("readme.txt") == nil {
+		t.Fatal("cp did not create readme.txt in root")
+	}
+	got := ctx.Root.FindChild("readme.txt").Content
+	if got != "Hello\n" {
+		t.Errorf("copied content = %q, want Hello", got)
+	}
+}
+
+// TestCpToNewName checks copying a file to a new name.
+func TestCpToNewName(t *testing.T) {
+	ctx, _, _ := newTestContext(t)
+
+	ctx.Cp([]string{"/home/readme.txt", "/copy.txt"})
+
+	copied := ctx.Root.FindChild("copy.txt")
+	if copied == nil {
+		t.Fatal("cp did not create copy.txt in root")
+	}
+	if copied.Name != "copy.txt" {
+		t.Errorf("copied name = %q, want copy.txt", copied.Name)
+	}
+}
+
+// TestCpDirWithoutR checks the error for copying a directory without -r.
+func TestCpDirWithoutR(t *testing.T) {
+	ctx, _, errOut := newTestContext(t)
+
+	ctx.Cp([]string{"/home", "/tmp"})
+
+	if !strings.Contains(errOut.String(), "-r not specified") {
+		t.Errorf("unexpected stderr: %q", errOut.String())
+	}
+}
+
+// TestCpDirRecursive checks recursive directory copy.
+func TestCpDirRecursive(t *testing.T) {
+	ctx, _, _ := newTestContext(t)
+
+	ctx.Cp([]string{"-r", "/home", "/backup"})
+
+	backup := ctx.Root.FindChild("backup")
+	if backup == nil {
+		t.Fatal("cp -r did not create backup in root")
+	}
+	if !backup.Dir {
+		t.Error("backup is not a directory")
+	}
+	if backup.FindChild("readme.txt") == nil {
+		t.Error("backup missing readme.txt")
+	}
+}
+
+// TestCpMissingSource checks the error for a missing source.
+func TestCpMissingSource(t *testing.T) {
+	ctx, _, errOut := newTestContext(t)
+
+	ctx.Cp([]string{"/no/such", "/tmp"})
+
+	if !strings.Contains(errOut.String(), "No such file or directory") {
+		t.Errorf("unexpected stderr: %q", errOut.String())
+	}
+}
+
+// TestCpUsage checks the error when the number of arguments is wrong.
+func TestCpUsage(t *testing.T) {
+	ctx, _, errOut := newTestContext(t)
+
+	ctx.Cp([]string{"/home/readme.txt"})
+
+	if !strings.Contains(errOut.String(), "usage") {
+		t.Errorf("unexpected stderr: %q", errOut.String())
+	}
+}

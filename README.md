@@ -7,7 +7,7 @@
 
 ## Текущий статус
 
-Реализованы этапы 1, 2, 3 и 4.
+Реализованы все пять этапов.
 
 - **Этап 1 — REPL.** Диалог с пользователем, разбор аргументов,
   раскрытие переменных окружения.
@@ -16,6 +16,7 @@
 - **Этап 3 — VFS.** Загрузка виртуальной файловой системы
   из CSV-файла, работа с деревом в памяти, команда `vfs-init`.
 - **Этап 4 — Основные команды.** Реальные `ls`, `cd`, `uptime`, `cat`.
+- **Этап 5 — Дополнительные команды.** Копирование `cp`.
 
 ## Возможности
 
@@ -31,7 +32,7 @@
 - Стартовый скрипт с поддержкой комментариев.
 - Виртуальная файловая система в памяти, загружаемая из CSV.
 - Команда `vfs-init` для сброса VFS на дефолтную.
-- Команды `ls` (с флагами `-l`, `-a`, `-h`), `cd`, `uptime`, `cat`.
+- Команды `ls` (с флагами `-l`, `-a`, `-h`), `cd`, `uptime`, `cat`, `cp`.
 
 ## Команды
 
@@ -39,8 +40,9 @@
 |---|---|
 | `ls [-lah] [путь...]` | Показать содержимое директории |
 | `cd [путь]` | Сменить текущую директорию |
-| `uptime` | Показать время работы эмулятора |
 | `cat файл...` | Показать содержимое файла |
+| `cp [-r] источник цель` | Скопировать файл или директорию |
+| `uptime` | Показать время работы эмулятора |
 | `conf-dump` | Вывести конфигурацию и состояние VFS |
 | `vfs-init` | Сбросить VFS на дефолтную |
 | `exit` | Завершить эмулятор |
@@ -61,7 +63,7 @@
 shell-emulator/
 ├── src/
 │   ├── main.go          Точка входа
-│   ├── commands/        Реализация команд (ls, cd, uptime, cat)
+│   ├── commands/        Реализация команд (ls, cd, uptime, cat, cp)
 │   ├── config/          Парсинг параметров командной строки
 │   ├── prompt/          Формирование приглашения
 │   ├── parser/          Разбор командной строки
@@ -101,6 +103,7 @@ make run-vfs-minimal
 make run-vfs-deep
 make run-vfs-broken
 make run-commands
+make run-cp
 ```
 
 Или вручную:
@@ -110,9 +113,6 @@ go run ./src/
 go run ./src/ --vfs testdata/vfs.csv
 go run ./src/ --script testdata/startup.txt
 go run ./src/ --vfs testdata/vfs.csv --script testdata/startup.txt
-go run ./src/ --vfs testdata/vfs-minimal.csv
-go run ./src/ --vfs testdata/vfs-deep.csv
-go run ./src/ --vfs testdata/vfs-broken.csv
 ```
 
 > **Примечание для Windows.** При запуске через `go run ./src/`
@@ -156,12 +156,16 @@ vfs.children = 2
 Пример `testdata/startup.txt`:
 
 ```
-// sample startup script
 ls /
 cd home
 ls
 cat readme.txt
-cd ..
+cp readme.txt /tmp
+cd /tmp
+ls
+cp -r /home /tmp
+ls
+cd /
 uptime
 exit
 ```
@@ -184,6 +188,7 @@ exit
 | `run-vfs-broken.sh` | битый VFS |
 | `run-vfs-init.sh` | сброс VFS через `vfs-init` |
 | `run-commands.sh` | все команды этапа 4 |
+| `run-cp.sh` | команды этапа 5 |
 | `run-all.sh` | прогон всех неинтерактивных скриптов |
 
 Запуск:
@@ -218,8 +223,6 @@ id,parent,name,type,content
 
 ### Тестовые VFS
 
-В папке `testdata/`:
-
 | Файл | Что содержит |
 |---|---|
 | `vfs-minimal.csv` | только корень `/` |
@@ -252,8 +255,6 @@ VFS reset to default and saved to testdata/vfs.csv
 
 ### ls
 
-Показывает содержимое директории. Директории помечаются `/`.
-
 | Флаг | Что делает |
 |---|---|
 | `-l` | Длинный формат: права, размер, имя |
@@ -274,9 +275,6 @@ User@host:/$ ls -lah /home
 
 ### cd
 
-Меняет текущую директорию. Без аргумента — в корень.
-Поддерживает `..`.
-
 ```
 User@host:/$ cd home
 User@host:/home$ cd ..
@@ -289,16 +287,12 @@ User@host:/$
 
 ### uptime
 
-Время работы эмулятора.
-
 ```
 User@host:/$ uptime
 up 2 minutes and 15 seconds
 ```
 
 ### cat
-
-Содержимое файла.
 
 ```
 User@host:/$ cat /home/readme.txt
@@ -311,12 +305,81 @@ cat: /no/such/file: No such file or directory
 
 ### Приглашение
 
-Приглашение содержит текущий путь в VFS:
-
 ```
 User@host:/$ 
 User@host:/home$ 
 User@host:/home/user$ 
+```
+
+## Этап 5 — Копирование
+
+### cp
+
+Копирует файл или директорию внутри VFS. Все изменения
+происходят **только в памяти** — исходные CSV-файлы не трогаются.
+
+| Флаг | Что делает |
+|---|---|
+| `-r` / `-R` | Рекурсивное копирование директорий |
+
+#### Копирование файла
+
+```
+User@host:/$ cp /home/readme.txt /tmp
+User@host:/$ ls /tmp
+readme.txt
+User@host:/$ cat /tmp/readme.txt
+Welcome to the emulator.
+```
+
+#### Копирование с новым именем
+
+```
+User@host:/$ cp /home/readme.txt /backup.txt
+User@host:/$ ls /
+backup.txt  home/  tmp/
+```
+
+#### Копирование директории
+
+```
+User@host:/$ cp -r /home /backup
+User@host:/$ ls /backup
+readme.txt
+```
+
+#### Ошибки
+
+| Ситуация | Сообщение |
+|---|---|
+| Мало аргументов | `cp: usage: cp [-r] source target` |
+| Источник не найден | `cp: /no/such: No such file or directory` |
+| Директория без `-r` | `cp: -r not specified; omitting directory "/home"` |
+| Копирование директории в себя | `cp: cannot copy a directory into itself` |
+
+#### Пример скрипта
+
+`testdata/startup.txt` содержит:
+
+```
+ls /
+cd home
+ls
+cat readme.txt
+cp readme.txt /tmp
+cd /tmp
+ls
+cp -r /home /tmp
+ls
+cd /
+uptime
+exit
+```
+
+Запуск:
+
+```bash
+make run-cp
 ```
 
 ## Лицензия

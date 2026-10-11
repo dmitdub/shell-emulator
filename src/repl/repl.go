@@ -1,8 +1,8 @@
 // Package repl implements the read-eval-print loop of the emulator.
 //
 // It reads input lines, dispatches them to commands, and prints
-// results. In stage 4 the ls, cd, uptime, and cat commands are
-// fully implemented on top of the virtual file system.
+// results. In stage 5 the cp command is added to the set of
+// commands implemented on top of the virtual file system.
 package repl
 
 import (
@@ -180,6 +180,8 @@ func (r *Runner) dispatch(name string, args []string) bool {
 		r.ctx.Uptime(args)
 	case "cat":
 		r.ctx.Cat(args)
+	case "cp":
+		r.ctx.Cp(args)
 	default:
 		fmt.Fprintf(r.ctx.ErrOut, "command not found: %s\n", name)
 	}

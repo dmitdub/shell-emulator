@@ -7,7 +7,8 @@ ifeq ($(OS),Windows_NT)
 endif
 
 .PHONY: all build run run-vfs run-script run-flags \
-        run-vfs-minimal run-vfs-deep run-vfs-broken run-commands \
+        run-vfs-minimal run-vfs-deep run-vfs-broken \
+        run-commands run-cp \
         demo test test-v fmt vet clean help
 
 all: build
@@ -40,6 +41,9 @@ run-vfs-broken:
 run-commands:
 	go run $(SRC) --vfs testdata/vfs.csv --script testdata/startup.txt
 
+run-cp:
+	go run $(SRC) --vfs testdata/vfs.csv --script testdata/startup.txt
+
 demo:
 	bash scripts/run-all.sh
 
@@ -69,6 +73,7 @@ help:
 	@echo "  run-vfs-deep    Run with deeply nested VFS"
 	@echo "  run-vfs-broken  Run with malformed VFS (error)"
 	@echo "  run-commands    Run all stage 4 commands"
+	@echo "  run-cp          Run stage 5 cp tests"
 	@echo "  demo            Run all shell scripts in scripts/"
 	@echo "  test            Run unit tests"
 	@echo "  test-v          Run unit tests with verbose output"
