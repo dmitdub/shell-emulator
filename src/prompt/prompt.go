@@ -1,7 +1,8 @@
 // Package prompt builds the interactive prompt of the emulator.
 //
-// The prompt is derived from real operating system data and looks
-// like "username@hostname:~$ ".
+// The prompt is derived from real operating system data and the
+// current working directory of the virtual file system. It looks
+// like "username@hostname:/path$ ".
 package prompt
 
 import (
@@ -20,10 +21,12 @@ const (
 
 // Build returns the prompt string for the emulator.
 //
-// On Windows the username returned by the OS includes a domain
-// prefix, which is stripped to keep the prompt readable.
-func Build() string {
-	return fmt.Sprintf("%s@%s:~$ ", username(), hostname())
+// The cwd parameter is the absolute path of the current working
+// directory in the virtual file system. On Windows the username
+// returned by the OS includes a domain prefix, which is stripped
+// to keep the prompt readable.
+func Build(cwd string) string {
+	return fmt.Sprintf("%s@%s:%s$ ", username(), hostname(), cwd)
 }
 
 // username returns the current user name without a domain prefix.

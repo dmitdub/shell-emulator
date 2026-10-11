@@ -21,12 +21,17 @@ type Node struct {
 	// Content holds the file content. It is empty for directories.
 	Content string
 
+	// Parent points to the parent node. It is nil for the root.
+	Parent *Node
+
 	// Children holds the child nodes. It is empty for files.
 	Children []*Node
 }
 
-// AddChild appends a child node and keeps children sorted by name.
+// AddChild appends a child node, sets its parent, and keeps
+// children sorted by name.
 func (n *Node) AddChild(child *Node) {
+	child.Parent = n
 	n.Children = append(n.Children, child)
 	sort.Slice(n.Children, func(i, j int) bool {
 		return n.Children[i].Name < n.Children[j].Name

@@ -1,9 +1,8 @@
 // Package repl implements the read-eval-print loop of the emulator.
 //
 // It reads input lines, dispatches them to commands, and prints
-// results. In stage 3 the emulator loads a virtual file system
-// from a CSV file, keeps it in memory, and provides the vfs-init
-// command. The ls and cd commands remain stubs.
+// results. In stage 4 the ls, cd, uptime, and cat commands are
+// fully implemented on top of the virtual file system.
 package repl
 
 import (
@@ -12,6 +11,7 @@ import (
 	"os"
 
 	"github.com/chzyer/readline"
+	"github.com/dmitdub/shell-emulator/src/commands"
 	"github.com/dmitdub/shell-emulator/src/config"
 	"github.com/dmitdub/shell-emulator/src/parser"
 	"github.com/dmitdub/shell-emulator/src/prompt"
@@ -28,10 +28,8 @@ const (
 
 // Runner holds the state of a single emulator session.
 type Runner struct {
-	cfg    *config.Config
-	out    io.Writer
-	errOut io.Writer
-	root   *vfs.Node
+	cfg *config.Config
+	ctx *commands.Context
 }
 
 // New creates a Runner with the given configuration.
@@ -45,7 +43,9 @@ func New(cfg *config.Config, out, errOut io.Writer) *Runner {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
-	return &Runner{cfg: cfg, out: out, errOut: errOut}
+
+	ctx := commands.New(&vfs.Node{Name: "/", Dir: true}, out, errOut)
+	return &Runner{cfg: cfg, ctx: ctx}
 }
 
 // Run loads the VFS, executes the startup script, and starts the REPL.
@@ -73,31 +73,37 @@ func (r *Runner) Run() error {
 //
 // When the VFS path is empty, a default in-memory tree is used.
 func (r *Runner) loadVFS() error {
+	var root *vfs.Node
 	if r.cfg.VFSPath == "" {
-		r.root = vfs.Default()
-		return nil
+		root = vfs.Default()
+	} else {
+		loaded, err := vfs.Load(r.cfg.VFSPath)
+		if err != nil {
+			return fmt.Errorf("load VFS: %w", err)
+		}
+		root = loaded
 	}
 
-	root, err := vfs.Load(r.cfg.VFSPath)
-	if err != nil {
-		return fmt.Errorf("load VFS: %w", err)
-	}
-	r.root = root
+	out := r.ctx.Out
+	errOut := r.ctx.ErrOut
+	r.ctx = commands.New(root, out, errOut)
 	return nil
 }
 
 // loop runs the interactive read-eval-print loop.
 func (r *Runner) loop() error {
-	rl, err := readline.New(prompt.Build())
+	rl, err := readline.New(prompt.Build(vfs.Path(r.ctx.Cwd)))
 	if err != nil {
 		return fmt.Errorf("start readline: %w", err)
 	}
 	defer rl.Close()
 
 	for {
+		rl.SetPrompt(prompt.Build(vfs.Path(r.ctx.Cwd)))
+
 		line, err := rl.Readline()
 		if err != nil {
-			fmt.Fprintln(r.out)
+			fmt.Fprintln(r.ctx.Out)
 			return nil
 		}
 		if r.handle(line) {
@@ -110,10 +116,10 @@ func (r *Runner) loop() error {
 //
 // The dump is produced once at startup for debugging purposes.
 func (r *Runner) dumpConfig() {
-	fmt.Fprintln(r.errOut, "configuration:")
-	r.cfg.Dump(r.errOut)
-	fmt.Fprintf(r.errOut, "vfs.root = %s\n", r.root.Name)
-	fmt.Fprintf(r.errOut, "vfs.children = %d\n", len(r.root.Children))
+	fmt.Fprintln(r.ctx.ErrOut, "configuration:")
+	r.cfg.Dump(r.ctx.ErrOut)
+	fmt.Fprintf(r.ctx.ErrOut, "vfs.root = %s\n", r.ctx.Root.Name)
+	fmt.Fprintf(r.ctx.ErrOut, "vfs.children = %d\n", len(r.ctx.Root.Children))
 }
 
 // runStartupScript executes commands from the startup script, if any.
@@ -126,15 +132,14 @@ func (r *Runner) runStartupScript() (bool, error) {
 		return false, nil
 	}
 
-	commands, err := script.Load(r.cfg.ScriptPath)
+	lines, err := script.Load(r.cfg.ScriptPath)
 	if err != nil {
 		return false, fmt.Errorf("load startup script: %w", err)
 	}
 
-	p := prompt.Build()
-	for _, cmd := range commands {
-		fmt.Fprintf(r.out, "%s%s\n", p, cmd)
-		if r.handle(cmd) {
+	for _, line := range lines {
+		fmt.Fprintf(r.ctx.Out, "%s%s\n", prompt.Build(vfs.Path(r.ctx.Cwd)), line)
+		if r.handle(line) {
 			return true, nil
 		}
 	}
@@ -147,7 +152,7 @@ func (r *Runner) runStartupScript() (bool, error) {
 func (r *Runner) handle(line string) bool {
 	args, err := parser.Parse(line)
 	if err != nil {
-		fmt.Fprintf(r.errOut, "parse error: %v\n", err)
+		fmt.Fprintf(r.ctx.ErrOut, "parse error: %v\n", err)
 		return false
 	}
 	if len(args) == 0 {
@@ -168,20 +173,25 @@ func (r *Runner) dispatch(name string, args []string) bool {
 	case vfsInitCommand:
 		r.initVFS()
 	case "ls":
-		r.stub("ls", args)
+		r.ctx.Ls(args)
 	case "cd":
-		r.stub("cd", args)
+		r.ctx.Cd(args)
+	case "uptime":
+		r.ctx.Uptime(args)
+	case "cat":
+		r.ctx.Cat(args)
 	default:
-		fmt.Fprintf(r.errOut, "command not found: %s\n", name)
+		fmt.Fprintf(r.ctx.ErrOut, "command not found: %s\n", name)
 	}
 	return false
 }
 
 // dumpVFS prints the current configuration and VFS state.
 func (r *Runner) dumpVFS() {
-	r.cfg.Dump(r.out)
-	fmt.Fprintf(r.out, "vfs.root = %s\n", r.root.Name)
-	fmt.Fprintf(r.out, "vfs.children = %d\n", len(r.root.Children))
+	r.cfg.Dump(r.ctx.Out)
+	fmt.Fprintf(r.ctx.Out, "vfs.root = %s\n", r.ctx.Root.Name)
+	fmt.Fprintf(r.ctx.Out, "vfs.cwd = %s\n", vfs.Path(r.ctx.Cwd))
+	fmt.Fprintf(r.ctx.Out, "vfs.children = %d\n", len(r.ctx.Root.Children))
 }
 
 // initVFS replaces the current VFS with the default one.
@@ -189,26 +199,19 @@ func (r *Runner) dumpVFS() {
 // When a VFS path is configured, the default tree is also written
 // back to that file. The original CSV file is overwritten.
 func (r *Runner) initVFS() {
-	r.root = vfs.Default()
+	root := vfs.Default()
+	out := r.ctx.Out
+	errOut := r.ctx.ErrOut
+	r.ctx = commands.New(root, out, errOut)
 
 	if r.cfg.VFSPath == "" {
-		fmt.Fprintln(r.out, "VFS reset to default")
+		fmt.Fprintln(r.ctx.Out, "VFS reset to default")
 		return
 	}
 
-	if err := vfs.Save(r.cfg.VFSPath, r.root); err != nil {
-		fmt.Fprintf(r.errOut, "vfs-init: %v\n", err)
+	if err := vfs.Save(r.cfg.VFSPath, root); err != nil {
+		fmt.Fprintf(r.ctx.ErrOut, "vfs-init: %v\n", err)
 		return
 	}
-	fmt.Fprintf(r.out, "VFS reset to default and saved to %s\n", r.cfg.VFSPath)
-}
-
-// stub prints a command name along with its arguments.
-//
-// It temporarily stands in for a real command implementation.
-func (r *Runner) stub(name string, args []string) {
-	fmt.Fprintln(r.out, name)
-	for _, arg := range args {
-		fmt.Fprintf(r.out, "  %s\n", arg)
-	}
+	fmt.Fprintf(r.ctx.Out, "VFS reset to default and saved to %s\n", r.cfg.VFSPath)
 }
