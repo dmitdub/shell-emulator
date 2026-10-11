@@ -1,8 +1,8 @@
 // Package repl implements the read-eval-print loop of the emulator.
 //
 // It reads input lines, dispatches them to commands, and prints
-// results. In stage 2 the emulator accepts a runtime configuration,
-// executes an optional startup script, and provides the conf-dump
+// results. In stage 3 the emulator loads a virtual file system
+// from a CSV file, keeps it in memory, and provides the vfs-init
 // command. The ls and cd commands remain stubs.
 package repl
 
@@ -16,19 +16,22 @@ import (
 	"github.com/dmitdub/shell-emulator/src/parser"
 	"github.com/dmitdub/shell-emulator/src/prompt"
 	"github.com/dmitdub/shell-emulator/src/script"
+	"github.com/dmitdub/shell-emulator/src/vfs"
 )
 
-// exitCommand terminates the emulator.
-const exitCommand = "exit"
-
-// confDumpCommand prints the current configuration.
-const confDumpCommand = "conf-dump"
+// Command names recognized by the emulator.
+const (
+	exitCommand     = "exit"
+	confDumpCommand = "conf-dump"
+	vfsInitCommand  = "vfs-init"
+)
 
 // Runner holds the state of a single emulator session.
 type Runner struct {
 	cfg    *config.Config
 	out    io.Writer
 	errOut io.Writer
+	root   *vfs.Node
 }
 
 // New creates a Runner with the given configuration.
@@ -45,12 +48,15 @@ func New(cfg *config.Config, out, errOut io.Writer) *Runner {
 	return &Runner{cfg: cfg, out: out, errOut: errOut}
 }
 
-// Run executes the startup script (if any) and then starts the REPL.
+// Run loads the VFS, executes the startup script, and starts the REPL.
 //
 // Run returns nil after the user types exit or presses Ctrl+D.
 // It does not start the interactive loop when the startup script
 // terminates the session.
 func (r *Runner) Run() error {
+	if err := r.loadVFS(); err != nil {
+		return err
+	}
 	r.dumpConfig()
 
 	done, err := r.runStartupScript()
@@ -61,6 +67,23 @@ func (r *Runner) Run() error {
 		return nil
 	}
 	return r.loop()
+}
+
+// loadVFS loads the virtual file system into memory.
+//
+// When the VFS path is empty, a default in-memory tree is used.
+func (r *Runner) loadVFS() error {
+	if r.cfg.VFSPath == "" {
+		r.root = vfs.Default()
+		return nil
+	}
+
+	root, err := vfs.Load(r.cfg.VFSPath)
+	if err != nil {
+		return fmt.Errorf("load VFS: %w", err)
+	}
+	r.root = root
+	return nil
 }
 
 // loop runs the interactive read-eval-print loop.
@@ -89,6 +112,8 @@ func (r *Runner) loop() error {
 func (r *Runner) dumpConfig() {
 	fmt.Fprintln(r.errOut, "configuration:")
 	r.cfg.Dump(r.errOut)
+	fmt.Fprintf(r.errOut, "vfs.root = %s\n", r.root.Name)
+	fmt.Fprintf(r.errOut, "vfs.children = %d\n", len(r.root.Children))
 }
 
 // runStartupScript executes commands from the startup script, if any.
@@ -139,7 +164,9 @@ func (r *Runner) dispatch(name string, args []string) bool {
 	case exitCommand:
 		return true
 	case confDumpCommand:
-		r.cfg.Dump(r.out)
+		r.dumpVFS()
+	case vfsInitCommand:
+		r.initVFS()
 	case "ls":
 		r.stub("ls", args)
 	case "cd":
@@ -148,6 +175,32 @@ func (r *Runner) dispatch(name string, args []string) bool {
 		fmt.Fprintf(r.errOut, "command not found: %s\n", name)
 	}
 	return false
+}
+
+// dumpVFS prints the current configuration and VFS state.
+func (r *Runner) dumpVFS() {
+	r.cfg.Dump(r.out)
+	fmt.Fprintf(r.out, "vfs.root = %s\n", r.root.Name)
+	fmt.Fprintf(r.out, "vfs.children = %d\n", len(r.root.Children))
+}
+
+// initVFS replaces the current VFS with the default one.
+//
+// When a VFS path is configured, the default tree is also written
+// back to that file. The original CSV file is overwritten.
+func (r *Runner) initVFS() {
+	r.root = vfs.Default()
+
+	if r.cfg.VFSPath == "" {
+		fmt.Fprintln(r.out, "VFS reset to default")
+		return
+	}
+
+	if err := vfs.Save(r.cfg.VFSPath, r.root); err != nil {
+		fmt.Fprintf(r.errOut, "vfs-init: %v\n", err)
+		return
+	}
+	fmt.Fprintf(r.out, "VFS reset to default and saved to %s\n", r.cfg.VFSPath)
 }
 
 // stub prints a command name along with its arguments.

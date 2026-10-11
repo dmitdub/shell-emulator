@@ -7,12 +7,14 @@
 
 ## Текущий статус
 
-Реализованы этапы 1 и 2.
+Реализованы этапы 1, 2 и 3.
 
 - **Этап 1 — REPL.** Диалог с пользователем, разбор аргументов,
   раскрытие переменных окружения, команды-заглушки.
 - **Этап 2 — Конфигурация.** Параметры командной строки,
   отладочный вывод, стартовый скрипт, команда `conf-dump`.
+- **Этап 3 — VFS.** Загрузка виртуальной файловой системы
+  из CSV-файла, работа с деревом в памяти, команда `vfs-init`.
 
 ## Возможности
 
@@ -27,6 +29,8 @@
 - Отладочный вывод конфигурации при запуске.
 - Команда `conf-dump` для просмотра конфигурации.
 - Стартовый скрипт с поддержкой комментариев.
+- Загрузка виртуальной файловой системы из CSV в память.
+- Команда `vfs-init` для сброса VFS на дефолтную.
 
 ## Команды
 
@@ -34,7 +38,8 @@
 |---|---|
 | `ls [аргументы...]` | Заглушка: печатает своё имя и аргументы |
 | `cd [аргументы...]` | Заглушка: печатает своё имя и аргументы |
-| `conf-dump` | Вывести текущие параметры конфигурации |
+| `conf-dump` | Вывести текущие параметры конфигурации и VFS |
+| `vfs-init` | Сбросить VFS на дефолтную (и перезаписать CSV) |
 | `exit` | Завершить эмулятор |
 
 ## Параметры командной строки
@@ -57,11 +62,15 @@ shell-emulator/
 │   ├── prompt/          Формирование приглашения
 │   ├── parser/          Разбор командной строки
 │   ├── repl/            Цикл REPL и диспетчер команд
-│   └── script/          Загрузка стартовых скриптов
+│   ├── script/          Загрузка стартовых скриптов
+│   └── vfs/             Виртуальная файловая система
 ├── tests/               Модульные тесты
 ├── testdata/            Тестовые данные
 │   ├── startup.txt      Пример стартового скрипта
-│   └── vfs.csv          Пример VFS (используется на этапе 3)
+│   ├── vfs.csv          Основной VFS
+│   ├── vfs-minimal.csv  Минимальный VFS
+│   ├── vfs-deep.csv     VFS с 4 уровнями вложенности
+│   └── vfs-broken.csv   Битый VFS для проверки ошибок
 ├── scripts/             Bash-скрипты для запуска эмулятора
 ├── Makefile             Сборка, тесты, запуск
 ├── go.mod               Модуль Go
@@ -100,6 +109,14 @@ make run-script
 make run-flags
 ```
 
+Запустить с разными VFS:
+
+```bash
+make run-vfs-minimal
+make run-vfs-deep
+make run-vfs-broken
+```
+
 Или вручную:
 
 ```bash
@@ -107,6 +124,9 @@ go run ./src/
 go run ./src/ --vfs testdata/vfs.csv
 go run ./src/ --script testdata/startup.txt
 go run ./src/ --vfs testdata/vfs.csv --script testdata/startup.txt
+go run ./src/ --vfs testdata/vfs-minimal.csv
+go run ./src/ --vfs testdata/vfs-deep.csv
+go run ./src/ --vfs testdata/vfs-broken.csv
 ```
 
 > **Примечание для Windows.** При запуске через `go run ./src/`
@@ -182,7 +202,9 @@ parse error: unbalanced quote
 ```
 User@host:~$ conf-dump
 vfs.path = testdata/vfs.csv
-script.path = testdata/startup.txt
+script.path = 
+vfs.root = /
+vfs.children = 2
 ```
 
 ### Выход
@@ -201,6 +223,8 @@ User@host:~$ exit
 configuration:
 vfs.path = testdata/vfs.csv
 script.path = testdata/startup.txt
+vfs.root = /
+vfs.children = 2
 ```
 
 Отладочный вывод идёт именно в stderr, чтобы не смешиваться
@@ -219,6 +243,9 @@ script.path = testdata/startup.txt
 ls /tmp
 cd /home/user
 ls "my documents"
+conf-dump
+vfs-init
+conf-dump
 exit
 ```
 
@@ -237,7 +264,11 @@ exit
 | `run-with-script.sh` | флаг `--script` |
 | `run-all-flags.sh` | оба флага |
 | `run-missing-script.sh` | ошибка при отсутствующем скрипте |
-| `run-all.sh` | прогон всех скриптов по очереди |
+| `run-vfs-minimal.sh` | VFS минимальный |
+| `run-vfs-deep.sh` | VFS глубокий |
+| `run-vfs-broken.sh` | битый VFS → ошибка |
+| `run-vfs-init.sh` | сброс VFS через `vfs-init` |
+| `run-all.sh` | прогон всех неинтерактивных скриптов |
 
 Запуск всех скриптов:
 
@@ -250,6 +281,79 @@ make demo
 ```bash
 bash scripts/run-all.sh
 ```
+
+## Этап 3 — VFS
+
+Виртуальная файловая система загружается из CSV-файла в память.
+Файл на диске **не модифицируется**, кроме случая команды `vfs-init`.
+
+### Формат CSV
+
+```
+id,parent,name,type,content
+0,-1,/,dir,
+1,0,home,dir,
+2,1,user,dir,
+3,2,notes.txt,file,Hello world
+```
+
+| Колонка | Значение |
+|---|---|
+| `id` | уникальный идентификатор узла |
+| `parent` | идентификатор родителя; `-1` — корень |
+| `name` | имя файла или директории |
+| `type` | `dir` или `file` |
+| `content` | содержимое файла (пусто для директорий) |
+
+### Тестовые VFS
+
+В папке `testdata/` лежат три варианта VFS:
+
+| Файл | Что содержит |
+|---|---|
+| `vfs-minimal.csv` | только корень `/` |
+| `vfs.csv` | несколько папок и файлов |
+| `vfs-deep.csv` | 4 уровня вложенности |
+
+Плюс `vfs-broken.csv` — для проверки обработки ошибок.
+
+### Запуск с разными VFS
+
+```bash
+make run-vfs           # основной (vfs.csv)
+make run-vfs-minimal   # минимальный
+make run-vfs-deep      # глубокий
+make run-vfs-broken    # битый → ошибка
+```
+
+Или вручную:
+
+```bash
+go run ./src/ --vfs testdata/vfs-minimal.csv
+go run ./src/ --vfs testdata/vfs-deep.csv
+go run ./src/ --vfs testdata/vfs-broken.csv
+```
+
+### Команда vfs-init
+
+```
+User@host:~$ vfs-init
+VFS reset to default and saved to testdata/vfs.csv
+```
+
+- Заменяет VFS в памяти на дефолтную
+- **Перезаписывает** исходный CSV-файл (по требованию методички)
+- Если `--vfs` не задан — работает только в памяти
+
+### Ошибки загрузки VFS
+
+| Ситуация | Сообщение |
+|---|---|
+| Файл не найден | `load VFS: open ...: no such file or directory` |
+| Битый CSV | `load VFS: read rows: ...` |
+| Неверный тип | `load VFS: row N: invalid type "xxx"` |
+| Нет корня | `load VFS: root node not found` |
+| Битый parent | `load VFS: node N: parent M not found` |
 
 ## Лицензия
 

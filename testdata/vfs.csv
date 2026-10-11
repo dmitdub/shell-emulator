@@ -1,5 +1,6 @@
-path,type,content
-/,dir,
-/home,dir,
-/home/user,dir,
-/home/user/readme.txt,file,Hello world
+id,parent,name,type,content
+0,-1,/,dir,
+1,0,home,dir,
+2,0,tmp,dir,
+3,1,readme.txt,file,Welcome to the emulator.
+4,2,test.log,file,Temporary log content.

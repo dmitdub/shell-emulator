@@ -1,0 +1,9 @@
+id,parent,name,type,content
+0,-1,/,dir,
+1,0,home,dir,
+2,1,user,dir,
+3,2,projects,dir,
+4,3,notes.txt,file,Deep file content.
+5,3,todo.md,file,- task one
+6,0,etc,dir,
+7,6,hosts,file,127.0.0.1 localhost

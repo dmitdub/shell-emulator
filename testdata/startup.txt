@@ -5,4 +5,5 @@ ls /tmp
 cd /home/user
 // A comment in the middle also works.
 ls "my documents"
+conf-dump
 exit
